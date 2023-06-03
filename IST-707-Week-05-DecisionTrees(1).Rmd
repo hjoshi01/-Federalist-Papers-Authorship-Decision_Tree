@@ -1,0 +1,127 @@
+---
+title: 'Decision Trees'
+output: html_document
+---
+
+## Load R Packages
+
+```{r, echo = FALSE}
+# helper packages
+#library(rJava)
+library(readr)       # for data import
+library(dplyr)       # for data wrangling
+
+# modeling packages
+#install.packages('Rweka')
+#library(RWeka)       # access to the J48 (C4.5) algorithm (requires Java installation)
+library(caret)       # meta engine for decision tree application
+
+# model interpretations packages
+library(rpart.plot)  # for plotting decision trees
+library(vip)         # for feature importance
+library(party)       # for plotting a J48 tree  
+```
+
+We will use `iris` dataset. It consists of 150 objects from each of three species of Iris flowers (Setosa, Virginica and Versicolor). For each object four attributes are measured length and width of sepal and petal.
+
+```{r}
+iris = read_csv('iris.csv')
+glimpse(iris)
+iris$class = as.factor(iris$class)
+```
+
+Create and plot a decision tree
+
+```{r}
+m = train(class ~ .,
+          data = iris,
+          method = 'rpart', # use rpart if you cannot use J48
+          )
+rpart.plot(m$finalModel)
+```
+
+#### How a decision tree works internally
+
+Behind the idea of a decision tree we will find what it is called **information gain**, a concept that measures the amount of information contained in a set of data. It gives the idea of importance of an attribute in a data set.
+
+The information gain calculation will answer the question of why the algorithm has decided to start with attribute Petal_Width. 
+
+```{r}
+library(FSelector)
+information.gain(class ~ ., data = iris)
+```
+
+Petal.Width has the highest IG in the `iris` data set.
+
+Let's go further in this study. We will take a subset of `iris` which contains only of observations with attribute Petal.Width > 0.6 and we will get the information gain of this subset.
+
+```{r}
+subset1.iris = iris |> filter(petal_width > 0.6)
+information.gain(class ~ ., data = subset1.iris)
+```
+
+Once again Petal.Width is the attribute which contains much more information and that is the reason why the second leaf of the tree starts from the attribute Petal.Width.
+
+Next step takes us to calculate the information gain of the subset which contains only objects with attribute petal_width <= 1.7
+
+```{r}
+subset2.iris = subset1.iris |> filter(petal_width <= 1.7)
+information.gain(class~., data = subset2.iris)
+```
+
+This time Petal.Length is the attribute with the highest information gain.
+
+In summary, Information Gain is the mathematical tool that algorithm J48 has used to decide, in each tree node, which variable fits better in terms of target variable prediction.
+
+Split iris into training and testing sets
+
+```{r}
+set.seed(9)
+index = createDataPartition(y=iris$class, p=0.5, list=FALSE)
+
+train.set = iris[index,]
+test.set = iris[-index,]
+
+dim(train.set)
+```
+
+Visualize the distribution of 3 classes.
+
+```{r}
+with(iris, qplot(petal_width, sepal_width, colour=class, cex=2))
+```
+
+Fit the first C4.5 model
+
+```{r}
+grid = expand.grid(.M=c(2,3,4,5,6,7,8,9,10), # .M = minimum samples for a leaf
+                   .C=c(0.01,0.05,0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50)) # .C = pruning confidence:	lower	values incur heavier pruning
+
+# fit the model
+iris.tree = train(class ~ ., 
+                  data = train.set, 
+                  method = 'J48', # use rpart if you cannot use J48
+                  trControl = trainControl(method = 'cv',number = 10),
+                  tuneGrid = grid)
+
+iris.tree
+```
+
+Plot the tree
+
+```{r}
+# plot the model
+plot(iris.tree$finalModel, uniform=TRUE,
+     main='Classification Tree')
+```
+
+Predict labels for the testing set
+
+```{r}
+iris.pred = predict(iris.tree, newdata = test.set)
+
+table(iris.pred, test.set$class)
+
+# https://topepo.github.io/caret/measuring-performance.html
+confusionMatrix(data = iris.pred, reference = test.set$class, mode = 'everything')
+```
